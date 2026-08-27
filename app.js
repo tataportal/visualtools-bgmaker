@@ -242,8 +242,6 @@ class TunnelRenderer {
     this.camera.position.set(0, 0, 0);
     this.scene.add(this.camera);
     this.ringRoot = new THREE.Group();
-    this.portalRoot = new THREE.Group();
-    this.scene.add(this.portalRoot);
     this.scene.add(this.ringRoot);
     this.rings = [];
     this.resources = [];
@@ -264,7 +262,6 @@ class TunnelRenderer {
 
   clearDesign() {
     this.ringRoot.clear();
-    this.portalRoot.clear();
     this.rings = [];
     for (const resource of this.resources) resource.dispose();
     this.resources = [];
@@ -373,19 +370,6 @@ class TunnelRenderer {
       this.rings.push(frame);
     }
 
-    const portalDistance = nearDistance * depthStep ** ringCount;
-    const stripeWidth = halfWidth * 2 * 0.07;
-    const stripeHeight = halfHeight * 2 * 0.78;
-    const baseColor = new THREE.Color(
-      settings.bgMode === "gradient" ? settings.bgColorB : settings.bgColorA,
-    );
-    const stripeColor = baseColor.clone().lerp(new THREE.Color("#ffffff"), 0.38);
-    const stripeGeometry = new THREE.PlaneGeometry(stripeWidth, stripeHeight);
-    const stripeMaterial = new THREE.MeshBasicMaterial({ color: stripeColor, toneMapped: false });
-    const stripe = new THREE.Mesh(stripeGeometry, stripeMaterial);
-    stripe.position.z = -portalDistance;
-    this.portalRoot.add(stripe);
-    this.resources.push(stripeGeometry, stripeMaterial);
   }
 
   buildRows(settings, spacingT) {
