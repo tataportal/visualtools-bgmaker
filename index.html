@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SALE MP4</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="stage">
+        <canvas id="preview" width="1080" height="1920"></canvas>
+      </section>
+
+      <aside class="panel">
+        <label class="field span-2">
+          Texto
+          <input id="text" type="text" value="SALE" maxlength="18" autocomplete="off" />
+        </label>
+
+        <label class="field">
+          Formato
+          <select id="format">
+            <option value="1x1">1x1</option>
+            <option value="3x2">3x2</option>
+            <option value="3x4">3x4</option>
+            <option value="4x5">4x5</option>
+            <option value="16x9" selected>16x9</option>
+          </select>
+        </label>
+
+        <label class="field">
+          Orientacion
+          <select id="orientation">
+            <option value="vertical" selected>Vertical</option>
+            <option value="horizontal">Horizontal</option>
+          </select>
+        </label>
+
+        <fieldset class="field movement-types span-2">
+          <legend>Modo</legend>
+          <div class="segmented">
+            <label>
+              <input type="radio" name="movementType" value="depth" checked />
+              <span>Avance</span>
+            </label>
+            <label>
+              <input type="radio" name="movementType" value="pulse" />
+              <span>Pulso</span>
+            </label>
+            <label>
+              <input type="radio" name="movementType" value="spin" />
+              <span>Giro</span>
+            </label>
+            <label>
+              <input type="radio" name="movementType" value="wave" />
+              <span>Onda</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <label class="field">
+          Velocidad <output id="motionOut">1.00</output>
+          <input id="motion" type="range" min="-2" max="2" value="1" step="0.05" />
+        </label>
+
+        <label class="field">
+          Espaciado <output id="spacingOut">1.00</output>
+          <input id="spacing" type="range" min="0.45" max="2.4" value="1.05" step="0.05" />
+        </label>
+
+        <label class="field">
+          Tamano <output id="scaleOut">1.00</output>
+          <input id="scale" type="range" min="0.55" max="1.8" value="0.9" step="0.05" />
+        </label>
+
+        <label class="field">
+          Perspectiva <output id="depthOut">0.72</output>
+          <input id="depth" type="range" min="0.25" max="0.95" value="0.68" step="0.01" />
+        </label>
+
+        <label class="field">
+          Fondo
+          <select id="bgMode">
+            <option value="solid" selected>Solido</option>
+            <option value="gradient">Gradiente</option>
+          </select>
+        </label>
+
+        <label class="field color-field">
+          Color A
+          <input id="bgColorA" type="color" value="#d91520" />
+        </label>
+
+        <label class="field color-field">
+          Color B
+          <input id="bgColorB" type="color" value="#ff9b8c" />
+        </label>
+
+        <label class="field color-field">
+          Texto
+          <input id="textColor" type="color" value="#050000" />
+        </label>
+
+        <label class="field span-2">
+          Angulo gradiente <output id="angleOut">90</output>
+          <input id="angle" type="range" min="0" max="360" value="90" step="1" />
+        </label>
+
+        <label class="field span-2">
+          Duracion <output id="durationOut">8s</output>
+          <input id="duration" type="range" min="3" max="15" value="8" step="1" />
+        </label>
+
+        <div class="actions span-2">
+          <button id="exportBtn" type="button">Exportar MP4</button>
+          <a id="downloadLink" hidden>Descargar</a>
+        </div>
+
+        <p id="status" class="status span-2">1080 x 1920 listo.</p>
+      </aside>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
