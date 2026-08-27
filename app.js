@@ -12,6 +12,15 @@ const controls = {
   spacing: $("#spacing"),
   scale: $("#scale"),
   depth: $("#depth"),
+  depthOrigin: $("#depthOrigin"),
+  density: $("#density"),
+  variation: $("#variation"),
+  amplitude: $("#amplitude"),
+  frequency: $("#frequency"),
+  twist: $("#twist"),
+  seed: $("#seed"),
+  vanishX: $("#vanishX"),
+  vanishY: $("#vanishY"),
   bgMode: $("#bgMode"),
   bgColorA: $("#bgColorA"),
   bgColorB: $("#bgColorB"),
@@ -25,6 +34,15 @@ const outputs = {
   spacing: $("#spacingOut"),
   scale: $("#scaleOut"),
   depth: $("#depthOut"),
+  depthOrigin: $("#depthOriginOut"),
+  density: $("#densityOut"),
+  variation: $("#variationOut"),
+  amplitude: $("#amplitudeOut"),
+  frequency: $("#frequencyOut"),
+  twist: $("#twistOut"),
+  seed: $("#seedOut"),
+  vanishX: $("#vanishXOut"),
+  vanishY: $("#vanishYOut"),
   angle: $("#angleOut"),
   duration: $("#durationOut"),
 };
@@ -32,6 +50,7 @@ const outputs = {
 const exportBtn = $("#exportBtn");
 const downloadLink = $("#downloadLink");
 const statusEl = $("#status");
+const depthOriginField = $("#depthOriginField");
 const colorBField = $("#colorBField");
 const angleField = $("#angleField");
 const compositionInputs = [...document.querySelectorAll('input[name="compositionType"]')];
@@ -55,6 +74,20 @@ function lerp(a, b, t) {
 
 function mod(value, divisor) {
   return ((value % divisor) + divisor) % divisor;
+}
+
+function random01(seed, index, salt = 0) {
+  let value = (seed | 0) ^ Math.imul(index + 1, 0x45d9f3b) ^ Math.imul(salt + 1, 0x27d4eb2d);
+  value ^= value >>> 16;
+  value = Math.imul(value, 0x7feb352d);
+  value ^= value >>> 15;
+  value = Math.imul(value, 0x846ca68b);
+  value ^= value >>> 16;
+  return (value >>> 0) / 4294967295;
+}
+
+function signedRandom(seed, index, salt = 0) {
+  return random01(seed, index, salt) * 2 - 1;
 }
 
 function even(value) {
@@ -96,6 +129,15 @@ function settingsNow() {
     spacing: Number(controls.spacing.value),
     scale: Number(controls.scale.value),
     depth: Number(controls.depth.value),
+    depthOrigin: Number(controls.depthOrigin.value),
+    density: Number(controls.density.value),
+    variation: Number(controls.variation.value),
+    amplitude: Number(controls.amplitude.value),
+    frequency: Number(controls.frequency.value),
+    twist: Number(controls.twist.value),
+    seed: Number(controls.seed.value),
+    vanishX: Number(controls.vanishX.value),
+    vanishY: Number(controls.vanishY.value),
     bgMode: controls.bgMode.value,
     bgColorA: controls.bgColorA.value,
     bgColorB: controls.bgColorB.value,
@@ -110,9 +152,19 @@ function syncUi() {
   outputs.spacing.value = settings.spacing.toFixed(2);
   outputs.scale.value = settings.scale.toFixed(2);
   outputs.depth.value = settings.depth.toFixed(2);
+  outputs.depthOrigin.value = settings.depthOrigin.toFixed(1);
+  outputs.density.value = String(settings.density);
+  outputs.variation.value = settings.variation.toFixed(2);
+  outputs.amplitude.value = settings.amplitude.toFixed(2);
+  outputs.frequency.value = settings.frequency.toFixed(2);
+  outputs.twist.value = settings.twist.toFixed(2);
+  outputs.seed.value = String(settings.seed);
+  outputs.vanishX.value = settings.vanishX.toFixed(2);
+  outputs.vanishY.value = settings.vanishY.toFixed(2);
   outputs.angle.value = String(settings.angle);
   outputs.duration.value = `${settings.duration}s`;
   const gradientEnabled = settings.bgMode === "gradient";
+  depthOriginField.hidden = settings.compositionType !== "tunnel";
   colorBField.hidden = !gradientEnabled;
   angleField.hidden = !gradientEnabled;
   statusEl.textContent = `${settings.width} x ${settings.height} listo.`;
@@ -273,9 +325,8 @@ class TunnelRenderer {
     this.clearDesign();
 
     const aspect = this.width / this.height;
-    const depthT = clamp(settings.depth, 0, 1);
-    const spacingT = clamp((settings.spacing - 0.15) / 2.85, 0, 1);
-    const fov = lerp(38, 82, depthT);
+    const depthT = clamp(settings.depth / 2, 0, 1);
+    const fov = lerp(26, 108, Math.pow(depthT, 0.82));
     const tangent = Math.tan(THREE.MathUtils.degToRad(fov / 2));
     const halfHeight = 1;
     const halfWidth = aspect;
@@ -291,44 +342,35 @@ class TunnelRenderer {
     this.scene.background = makeBackgroundTexture(settings);
 
     if (settings.compositionType === "rows") {
-      this.buildRows(settings, spacingT);
+      this.buildRows(settings);
     } else if (settings.compositionType === "columns") {
-      this.buildColumns(settings, spacingT);
+      this.buildColumns(settings);
     } else if (settings.compositionType === "grid") {
-      this.buildGrid(settings, spacingT);
+      this.buildGrid(settings);
     } else {
-      this.buildTunnel(settings, aspect, tangent, depthT, spacingT);
+      this.buildTunnel(settings, aspect, tangent, depthT);
     }
   }
 
-  buildTunnel(settings, aspect, tangent, depthT, spacingT) {
+  buildTunnel(settings, aspect, tangent, depthT) {
     const halfHeight = this.halfHeight;
     const halfWidth = this.halfWidth;
     const shortAxisScale = Math.min(1, aspect);
     const frameWidth = halfWidth * 2.08;
     const frameHeight = halfHeight * 2.08;
     const nearDistance = halfHeight / (tangent * 1.08);
-    const farRatio = lerp(4.5, 7.2, depthT);
-    const depthStep = clamp(
-      lerp(1.12, 1.52, depthT) * lerp(0.97, 1.06, spacingT),
-      1.085,
-      1.68,
-    );
     const textHeight = 0.205 * shortAxisScale * settings.scale;
-    const ringCount = clamp(
-      Math.floor(Math.log(farRatio) / Math.log(depthStep)) + 1,
-      6,
-      12,
-    );
+    const ringCount = clamp(Math.round(settings.density), 2, 36);
 
     this.nearDistance = nearDistance;
-    this.depthStep = depthStep;
     this.ringCount = ringCount;
+    this.tunnelFarRatio = settings.depthOrigin;
+    this.tunnelCurve = lerp(0.42, 3.4, depthT);
 
     const asset = makeWordAsset(settings.text, settings, textHeight);
     asset.material.depthWrite = true;
-    const wordGap = textHeight * lerp(0.08, 2.7, spacingT);
-    const cornerGap = textHeight * lerp(0.5, 2.4, spacingT);
+    const wordGap = textHeight * settings.spacing;
+    const cornerGap = textHeight * (0.35 + settings.spacing * 0.5);
     const wordGeometries = [];
 
     const addSide = (length, fixed, rotation, vertical) => {
@@ -366,14 +408,23 @@ class TunnelRenderer {
 
     for (let index = 0; index < ringCount; index += 1) {
       const frame = new THREE.Mesh(frameGeometry, asset.material);
+      frame.userData = {
+        index,
+        depthJitter: signedRandom(settings.seed, index, 1) * settings.variation * 0.22,
+        xJitter: signedRandom(settings.seed, index, 2) * settings.variation * 0.22,
+        yJitter: signedRandom(settings.seed, index, 3) * settings.variation * 0.22,
+        rotationJitter: signedRandom(settings.seed, index, 4) * settings.variation * 0.42,
+        scaleJitter: signedRandom(settings.seed, index, 5) * settings.variation * 0.38,
+        phaseJitter: random01(settings.seed, index, 6) * Math.PI * 2,
+      };
       this.ringRoot.add(frame);
       this.rings.push(frame);
     }
 
   }
 
-  buildRows(settings, spacingT) {
-    const rowCount = clamp(Math.round(lerp(15, 4, spacingT)), 4, 15);
+  buildRows(settings) {
+    const rowCount = clamp(Math.round(settings.density), 2, 36);
     const laneHeight = (this.halfHeight * 2) / rowCount;
 
     for (let index = 0; index < rowCount; index += 1) {
@@ -381,23 +432,37 @@ class TunnelRenderer {
       const textHeight = laneHeight * 0.74 * settings.scale;
       const asset = makeWordAsset(text, settings, textHeight);
       asset.material.depthWrite = false;
-      const gap = textHeight * lerp(0.08, 3.2, spacingT);
+      const gap = textHeight * settings.spacing;
       const wordStep = asset.width + gap;
       const normalizedY = rowCount === 1 ? 0 : (index / (rowCount - 1)) * 2 - 1;
-      const distance = this.patternDistance * (
+      const distanceBase = this.patternDistance * (
         1 + Math.abs(normalizedY) * this.depthStrength * 1.15
+      );
+      const distance = distanceBase * Math.max(
+        0.32,
+        1 + signedRandom(settings.seed, index, 10) * settings.variation * 0.24,
       );
       const projectionScale = distance / this.patternDistance;
       const screenY = this.halfHeight - laneHeight * (index + 0.5);
       const baseY = screenY * projectionScale;
       const span = this.halfWidth * 4.2 * projectionScale;
-      const wordCount = Math.ceil(span / wordStep) + 3;
+      const wordCount = clamp(Math.ceil(span / wordStep) + 3, 3, 80);
       const start = -(wordCount * wordStep) / 2 + wordStep / 2;
       const row = new THREE.Group();
 
       for (let wordIndex = 0; wordIndex < wordCount; wordIndex += 1) {
         const word = new THREE.Mesh(asset.geometry, asset.material);
-        word.position.x = start + wordIndex * wordStep;
+        const randomIndex = index * 1000 + wordIndex;
+        word.position.x = start + wordIndex * wordStep +
+          signedRandom(settings.seed, randomIndex, 11) * wordStep * settings.variation * 0.15;
+        word.position.y = signedRandom(settings.seed, randomIndex, 12) *
+          textHeight * settings.variation * 0.58;
+        word.rotation.z = signedRandom(settings.seed, randomIndex, 13) *
+          settings.variation * 0.38;
+        word.scale.setScalar(Math.max(
+          0.12,
+          1 + signedRandom(settings.seed, randomIndex, 14) * settings.variation * 0.42,
+        ));
         row.add(word);
       }
 
@@ -409,7 +474,12 @@ class TunnelRenderer {
         baseDistance: distance,
         laneHeight: laneHeight * projectionScale,
         wordStep,
-        baseOffset: mod(index * wordStep * 0.37, wordStep),
+        baseOffset: mod(random01(settings.seed, index, 15) * wordStep, wordStep),
+        xJitter: signedRandom(settings.seed, index, 16) * settings.variation,
+        yJitter: signedRandom(settings.seed, index, 17) * settings.variation,
+        rotationJitter: signedRandom(settings.seed, index, 18) * settings.variation,
+        scaleJitter: signedRandom(settings.seed, index, 19) * settings.variation,
+        phaseJitter: random01(settings.seed, index, 20) * Math.PI * 2,
       };
       this.ringRoot.add(row);
       this.rings.push(row);
@@ -417,8 +487,8 @@ class TunnelRenderer {
     }
   }
 
-  buildColumns(settings, spacingT) {
-    const columnCount = clamp(Math.round(lerp(12, 3, spacingT)), 3, 12);
+  buildColumns(settings) {
+    const columnCount = clamp(Math.round(settings.density), 2, 36);
     const laneWidth = (this.halfWidth * 2) / columnCount;
 
     for (let index = 0; index < columnCount; index += 1) {
@@ -426,24 +496,37 @@ class TunnelRenderer {
       const textHeight = laneWidth * 0.76 * settings.scale;
       const asset = makeWordAsset(text, settings, textHeight);
       asset.material.depthWrite = false;
-      const gap = textHeight * lerp(0.08, 3.2, spacingT);
+      const gap = textHeight * settings.spacing;
       const wordStep = asset.width + gap;
       const normalizedX = columnCount === 1 ? 0 : (index / (columnCount - 1)) * 2 - 1;
-      const distance = this.patternDistance * (
+      const distanceBase = this.patternDistance * (
         1 + Math.abs(normalizedX) * this.depthStrength * 1.15
+      );
+      const distance = distanceBase * Math.max(
+        0.32,
+        1 + signedRandom(settings.seed, index, 30) * settings.variation * 0.24,
       );
       const projectionScale = distance / this.patternDistance;
       const screenX = -this.halfWidth + laneWidth * (index + 0.5);
       const baseX = screenX * projectionScale;
       const span = this.halfHeight * 4.2 * projectionScale;
-      const wordCount = Math.ceil(span / wordStep) + 3;
+      const wordCount = clamp(Math.ceil(span / wordStep) + 3, 3, 80);
       const start = -(wordCount * wordStep) / 2 + wordStep / 2;
       const column = new THREE.Group();
 
       for (let wordIndex = 0; wordIndex < wordCount; wordIndex += 1) {
         const word = new THREE.Mesh(asset.geometry, asset.material);
-        word.position.y = start + wordIndex * wordStep;
-        word.rotation.z = -Math.PI / 2;
+        const randomIndex = index * 1000 + wordIndex;
+        word.position.y = start + wordIndex * wordStep +
+          signedRandom(settings.seed, randomIndex, 31) * wordStep * settings.variation * 0.15;
+        word.position.x = signedRandom(settings.seed, randomIndex, 32) *
+          textHeight * settings.variation * 0.58;
+        word.rotation.z = -Math.PI / 2 + signedRandom(settings.seed, randomIndex, 33) *
+          settings.variation * 0.38;
+        word.scale.setScalar(Math.max(
+          0.12,
+          1 + signedRandom(settings.seed, randomIndex, 34) * settings.variation * 0.42,
+        ));
         column.add(word);
       }
 
@@ -455,7 +538,12 @@ class TunnelRenderer {
         baseDistance: distance,
         laneWidth: laneWidth * projectionScale,
         wordStep,
-        baseOffset: mod(index * wordStep * 0.41, wordStep),
+        baseOffset: mod(random01(settings.seed, index, 35) * wordStep, wordStep),
+        xJitter: signedRandom(settings.seed, index, 36) * settings.variation,
+        yJitter: signedRandom(settings.seed, index, 37) * settings.variation,
+        rotationJitter: signedRandom(settings.seed, index, 38) * settings.variation,
+        scaleJitter: signedRandom(settings.seed, index, 39) * settings.variation,
+        phaseJitter: random01(settings.seed, index, 40) * Math.PI * 2,
       };
       this.ringRoot.add(column);
       this.rings.push(column);
@@ -463,16 +551,17 @@ class TunnelRenderer {
     }
   }
 
-  buildGrid(settings, spacingT) {
-    const columnCount = clamp(Math.round(lerp(9, 3, spacingT)), 3, 9);
+  buildGrid(settings) {
+    const densityT = clamp((settings.density - 2) / 34, 0, 1);
+    const columnCount = clamp(Math.round(lerp(2, 12, densityT)), 2, 12);
     const rowCount = clamp(
       Math.round((columnCount / Math.max(this.halfWidth, 0.4)) * 0.7),
-      3,
-      12,
+      2,
+      24,
     );
     const cellWidth = (this.halfWidth * 2) / columnCount;
     const cellHeight = (this.halfHeight * 2) / rowCount;
-    const cellFill = lerp(0.96, 0.5, spacingT);
+    const cellFill = clamp(1 / (1 + settings.spacing * 0.18), 0.28, 1);
     const geometry = new THREE.PlaneGeometry(
       cellWidth * cellFill,
       cellHeight * cellFill * 0.86,
@@ -489,17 +578,35 @@ class TunnelRenderer {
     for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
       for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
         const index = rowIndex * columnCount + columnIndex;
-        const cell = new THREE.Mesh(geometry, variants[index % variants.length]);
+        const variantIndex = Math.floor(
+          random01(settings.seed, index, 50) * variants.length,
+        ) % variants.length;
+        const cell = new THREE.Mesh(geometry, variants[variantIndex]);
         const screenX = -this.halfWidth + cellWidth * (columnIndex + 0.5);
         const screenY = this.halfHeight - cellHeight * (rowIndex + 0.5);
         const normalizedX = screenX / Math.max(this.halfWidth, 0.001);
         const normalizedY = screenY / this.halfHeight;
         const radial = Math.min(1, Math.hypot(normalizedX, normalizedY) / Math.SQRT2);
-        const distance = this.patternDistance * (1 + radial * this.depthStrength * 1.05);
+        const distanceBase = this.patternDistance * (1 + radial * this.depthStrength * 1.55);
+        const distance = distanceBase * Math.max(
+          0.3,
+          1 + signedRandom(settings.seed, index, 51) * settings.variation * 0.28,
+        );
         const projectionScale = distance / this.patternDistance;
-        const baseX = screenX * projectionScale;
-        const baseY = screenY * projectionScale;
+        const baseX = (
+          screenX + signedRandom(settings.seed, index, 52) * cellWidth * settings.variation * 0.5
+        ) * projectionScale;
+        const baseY = (
+          screenY + signedRandom(settings.seed, index, 53) * cellHeight * settings.variation * 0.5
+        ) * projectionScale;
+        const scaleJitter = Math.max(
+          0.1,
+          1 + signedRandom(settings.seed, index, 54) * settings.variation * 0.48,
+        );
+        const rotationJitter = signedRandom(settings.seed, index, 55) * settings.variation * 0.6;
         cell.position.set(baseX, baseY, -distance);
+        cell.rotation.z = rotationJitter;
+        cell.scale.setScalar(scaleJitter);
         cell.userData = {
           kind: "cell",
           index,
@@ -513,6 +620,9 @@ class TunnelRenderer {
           baseY,
           baseDistance: distance,
           projectionScale,
+          scaleJitter,
+          rotationJitter,
+          phaseJitter: random01(settings.seed, index, 56) * Math.PI * 2,
         };
         this.ringRoot.add(cell);
         this.rings.push(cell);
@@ -528,6 +638,10 @@ class TunnelRenderer {
       settings.spacing,
       settings.scale,
       settings.depth,
+      settings.depthOrigin,
+      settings.density,
+      settings.variation,
+      settings.seed,
       settings.bgMode,
       settings.bgColorA,
       settings.bgColorB,
@@ -555,96 +669,172 @@ class TunnelRenderer {
     this.renderer.render(this.scene, this.camera);
   }
 
+  tunnelDistance(depthIndex) {
+    const normalized = clamp(
+      depthIndex / Math.max(1, this.ringCount - 0.001),
+      0,
+      1,
+    );
+    const curved = Math.pow(normalized, this.tunnelCurve);
+    return this.nearDistance * Math.pow(this.tunnelFarRatio, curved);
+  }
+
   renderTunnel(time, settings) {
-    const speed = settings.motion * 1.8;
+    const speed = settings.motion * 1.35;
+    const amplitude = settings.amplitude;
+    const frequency = settings.frequency;
 
     for (let index = 0; index < this.rings.length; index += 1) {
       const frame = this.rings[index];
-      let distance;
+      const data = frame.userData;
+      let depthIndex = index;
+      let modeRotation = 0;
+      let modeScale = 1;
+      let waveX = 0;
+      let waveY = 0;
 
-      frame.position.set(0, 0, 0);
-      frame.rotation.set(0, 0, 0);
-      frame.scale.setScalar(1);
-
-      if (settings.movementType === "pulse") {
-        const baseDistance = this.nearDistance * this.depthStep ** index;
-        const phase = time * speed * 1.35 + index * 0.42;
-        distance = baseDistance * (1 + Math.sin(phase) * 0.13);
-        frame.scale.setScalar(1 + Math.sin(phase * 0.82) * 0.055);
-      } else if (settings.movementType === "spin") {
-        const progress = time * speed * 0.46;
-        const depthIndex = mod(index - progress, this.ringCount);
-        distance = this.nearDistance * this.depthStep ** depthIndex;
-        frame.rotation.z = time * speed * 0.34 + index * 0.055;
-      } else if (settings.movementType === "wave") {
-        const baseDistance = this.nearDistance * this.depthStep ** index;
-        const phase = time * speed * 1.15 + index * 0.55;
-        distance = baseDistance * (1 + Math.sin(phase) * 0.09);
-        frame.position.x = Math.sin(phase) * this.halfWidth * 0.1;
-        frame.position.y = Math.cos(phase * 0.83) * this.halfHeight * 0.075;
-        frame.rotation.z = Math.sin(phase * 0.72) * 0.1;
-      } else {
-        const progress = time * speed * 0.78;
-        const depthIndex = mod(index - progress, this.ringCount);
-        distance = this.nearDistance * this.depthStep ** depthIndex;
+      if (settings.movementType === "spin") {
+        depthIndex = mod(index - time * speed * 0.72, this.ringCount);
+        modeRotation = time * speed * 0.42 + depthIndex * 0.055;
+      } else if (settings.movementType === "depth") {
+        depthIndex = mod(index - time * speed, this.ringCount);
       }
 
-      frame.position.z = -distance;
+      const phase = time * speed * frequency + index * 0.48 + data.phaseJitter;
+      let distance = this.tunnelDistance(depthIndex);
+
+      if (settings.movementType === "pulse") {
+        distance *= Math.max(0.16, 1 + Math.sin(phase) * 0.22 * amplitude);
+        modeScale = Math.max(0.12, 1 + Math.sin(phase * 0.82) * 0.18 * amplitude);
+      } else if (settings.movementType === "wave") {
+        distance *= Math.max(0.16, 1 + Math.sin(phase) * 0.16 * amplitude);
+        waveX = Math.sin(phase) * this.halfWidth * 0.16 * amplitude;
+        waveY = Math.cos(phase * 0.83) * this.halfHeight * 0.12 * amplitude;
+        modeRotation = Math.sin(phase * 0.72) * 0.18 * amplitude;
+      }
+
+      distance *= Math.max(0.16, 1 + data.depthJitter);
+      const projectionScale = distance / this.patternDistance;
+      const vanishX = settings.vanishX * this.halfWidth * 0.9;
+      const vanishY = settings.vanishY * this.halfHeight * 0.9;
+      const jitterX = data.xJitter * this.halfWidth;
+      const jitterY = data.yJitter * this.halfHeight;
+      const twist = settings.twist * (depthIndex / Math.max(1, this.ringCount)) * 0.72;
+
+      frame.position.set(
+        (vanishX + jitterX + waveX) * projectionScale,
+        (vanishY + jitterY + waveY) * projectionScale,
+        -distance,
+      );
+      frame.rotation.set(0, 0, twist + data.rotationJitter + modeRotation);
+      frame.scale.setScalar(Math.max(0.08, (1 + data.scaleJitter) * modeScale));
     }
   }
 
   renderRows(time, settings) {
     for (const row of this.rings) {
-      const { index, baseY, baseDistance, laneHeight, wordStep, baseOffset } = row.userData;
+      const {
+        index,
+        baseY,
+        baseDistance,
+        laneHeight,
+        wordStep,
+        baseOffset,
+        xJitter,
+        yJitter,
+        rotationJitter,
+        scaleJitter,
+        phaseJitter,
+      } = row.userData;
       const direction = index % 2 === 0 ? 1 : -1;
-      const speed = settings.motion * 2;
-      const phase = time * speed * 1.15 + index * 0.72;
+      const speed = settings.motion * 1.45;
+      const phase = time * speed * settings.frequency + index * 0.72 + phaseJitter;
       const travel = time * speed * wordStep * 0.44 * direction;
       const loopX = mod(baseOffset - travel, wordStep) - wordStep * 0.5;
       const restingX = mod(baseOffset, wordStep) - wordStep * 0.5;
+      const projectionScale = baseDistance / this.patternDistance;
+      const vanishX = settings.vanishX * this.halfWidth * 0.9 * projectionScale;
+      const vanishY = settings.vanishY * this.halfHeight * 0.9 * projectionScale;
+      const randomX = xJitter * this.halfWidth * 0.2 * projectionScale;
+      const randomY = yJitter * laneHeight * 0.7;
+      const baseRotation = rotationJitter * 0.28 +
+        settings.twist * (index / Math.max(1, this.rings.length - 1) - 0.5) * 0.48;
+      const baseScale = Math.max(0.12, 1 + scaleJitter * 0.34);
 
-      row.position.set(settings.movementType === "depth" ? loopX : restingX, baseY, -baseDistance);
-      row.rotation.set(0, 0, 0);
-      row.scale.set(1, 1, 1);
+      row.position.set(
+        (settings.movementType === "depth" ? loopX : restingX) + vanishX + randomX,
+        baseY + vanishY + randomY,
+        -baseDistance,
+      );
+      row.rotation.set(0, 0, baseRotation);
+      row.scale.set(baseScale, baseScale, 1);
 
       if (settings.movementType === "pulse") {
-        row.scale.x = 0.78 + (Math.sin(phase) + 1) * 0.16;
-        row.scale.y = 0.86 + (Math.cos(phase * 0.8) + 1) * 0.09;
+        row.scale.x *= Math.max(0.08, 1 + Math.sin(phase) * 0.34 * settings.amplitude);
+        row.scale.y *= Math.max(0.08, 1 + Math.cos(phase * 0.8) * 0.2 * settings.amplitude);
       } else if (settings.movementType === "spin") {
-        row.rotation.z = Math.sin(phase * 0.72) * (0.09 + this.depthStrength * 0.13);
-        row.position.x = restingX + Math.cos(phase) * this.halfWidth * 0.12;
+        row.rotation.z += Math.sin(phase * 0.72) *
+          (0.15 + this.depthStrength * 0.2) * settings.amplitude;
+        row.position.x += Math.cos(phase) * this.halfWidth * 0.18 * settings.amplitude;
       } else if (settings.movementType === "wave") {
-        row.position.y = baseY + Math.sin(phase) * laneHeight * 0.34;
-        row.position.x = loopX + Math.cos(phase * 0.68) * this.halfWidth * 0.09;
-        row.rotation.z = Math.sin(phase * 0.58) * 0.065;
+        row.position.y += Math.sin(phase) * laneHeight * 0.58 * settings.amplitude;
+        row.position.x = loopX + vanishX + randomX +
+          Math.cos(phase * 0.68) * this.halfWidth * 0.14 * settings.amplitude;
+        row.rotation.z += Math.sin(phase * 0.58) * 0.1 * settings.amplitude;
       }
     }
   }
 
   renderColumns(time, settings) {
     for (const column of this.rings) {
-      const { index, baseX, baseDistance, laneWidth, wordStep, baseOffset } = column.userData;
+      const {
+        index,
+        baseX,
+        baseDistance,
+        laneWidth,
+        wordStep,
+        baseOffset,
+        xJitter,
+        yJitter,
+        rotationJitter,
+        scaleJitter,
+        phaseJitter,
+      } = column.userData;
       const direction = index % 2 === 0 ? 1 : -1;
-      const speed = settings.motion * 2;
-      const phase = time * speed * 1.12 + index * 0.77;
+      const speed = settings.motion * 1.45;
+      const phase = time * speed * settings.frequency + index * 0.77 + phaseJitter;
       const travel = time * speed * wordStep * 0.42 * direction;
       const loopY = mod(baseOffset + travel, wordStep) - wordStep * 0.5;
       const restingY = mod(baseOffset, wordStep) - wordStep * 0.5;
+      const projectionScale = baseDistance / this.patternDistance;
+      const vanishX = settings.vanishX * this.halfWidth * 0.9 * projectionScale;
+      const vanishY = settings.vanishY * this.halfHeight * 0.9 * projectionScale;
+      const randomX = xJitter * laneWidth * 0.7;
+      const randomY = yJitter * this.halfHeight * 0.2 * projectionScale;
+      const baseRotation = rotationJitter * 0.28 +
+        settings.twist * (index / Math.max(1, this.rings.length - 1) - 0.5) * 0.48;
+      const baseScale = Math.max(0.12, 1 + scaleJitter * 0.34);
 
-      column.position.set(baseX, settings.movementType === "depth" ? loopY : restingY, -baseDistance);
-      column.rotation.set(0, 0, 0);
-      column.scale.set(1, 1, 1);
+      column.position.set(
+        baseX + vanishX + randomX,
+        (settings.movementType === "depth" ? loopY : restingY) + vanishY + randomY,
+        -baseDistance,
+      );
+      column.rotation.set(0, 0, baseRotation);
+      column.scale.set(baseScale, baseScale, 1);
 
       if (settings.movementType === "pulse") {
-        column.scale.x = 0.76 + (Math.sin(phase) + 1) * 0.18;
-        column.scale.y = 0.86 + (Math.cos(phase * 0.74) + 1) * 0.09;
+        column.scale.x *= Math.max(0.08, 1 + Math.sin(phase) * 0.36 * settings.amplitude);
+        column.scale.y *= Math.max(0.08, 1 + Math.cos(phase * 0.74) * 0.2 * settings.amplitude);
       } else if (settings.movementType === "spin") {
-        column.rotation.z = Math.sin(phase * 0.66) * (0.1 + this.depthStrength * 0.12);
-        column.position.y = restingY + Math.cos(phase) * this.halfHeight * 0.11;
+        column.rotation.z += Math.sin(phase * 0.66) *
+          (0.16 + this.depthStrength * 0.2) * settings.amplitude;
+        column.position.y += Math.cos(phase) * this.halfHeight * 0.17 * settings.amplitude;
       } else if (settings.movementType === "wave") {
-        column.position.x = baseX + Math.sin(phase) * laneWidth * 0.36;
-        column.position.y = loopY + Math.cos(phase * 0.62) * this.halfHeight * 0.09;
-        column.rotation.z = Math.sin(phase * 0.53) * 0.075;
+        column.position.x += Math.sin(phase) * laneWidth * 0.62 * settings.amplitude;
+        column.position.y = loopY + vanishY + randomY +
+          Math.cos(phase * 0.62) * this.halfHeight * 0.14 * settings.amplitude;
+        column.rotation.z += Math.sin(phase * 0.53) * 0.11 * settings.amplitude;
       }
     }
   }
@@ -663,39 +853,58 @@ class TunnelRenderer {
         baseY,
         baseDistance,
         projectionScale,
+        scaleJitter,
+        rotationJitter,
+        phaseJitter,
       } = cell.userData;
-      const speed = settings.motion * 2;
-      const phase = time * speed * 1.2 + rowIndex * 0.58 + columnIndex * 0.71;
+      const speed = settings.motion * 1.45;
+      const phase = time * speed * settings.frequency +
+        rowIndex * 0.58 + columnIndex * 0.71 + phaseJitter;
+      const vanishX = settings.vanishX * this.halfWidth * 0.9 * projectionScale;
+      const vanishY = settings.vanishY * this.halfHeight * 0.9 * projectionScale;
+      const twist = settings.twist *
+        (index / Math.max(1, this.rings.length - 1) - 0.5) * 0.62;
 
-      cell.position.set(baseX, baseY, -baseDistance);
-      cell.rotation.set(0, 0, 0);
-      cell.scale.set(1, 1, 1);
+      cell.position.set(baseX + vanishX, baseY + vanishY, -baseDistance);
+      cell.rotation.set(0, 0, rotationJitter + twist);
+      cell.scale.setScalar(scaleJitter);
 
       if (settings.movementType === "pulse") {
-        const pulse = 0.78 + (Math.sin(phase) + 1) * 0.16;
-        cell.scale.setScalar(pulse);
-        cell.position.z = -baseDistance * (1 + Math.sin(phase) * 0.075);
+        const pulse = Math.max(0.08, 1 + Math.sin(phase) * 0.38 * settings.amplitude);
+        cell.scale.multiplyScalar(pulse);
+        cell.position.z = -baseDistance * Math.max(
+          0.16,
+          1 + Math.sin(phase) * 0.14 * settings.amplitude,
+        );
       } else if (settings.movementType === "spin") {
         const direction = (rowIndex + columnIndex) % 2 === 0 ? 1 : -1;
-        cell.rotation.z = time * speed * 0.48 * direction + index * 0.025;
-        cell.scale.setScalar(0.88 + Math.sin(phase * 0.7) * 0.08);
+        cell.rotation.z += time * speed * 0.48 * direction * settings.amplitude;
+        cell.scale.multiplyScalar(Math.max(
+          0.08,
+          1 + Math.sin(phase * 0.7) * 0.2 * settings.amplitude,
+        ));
       } else if (settings.movementType === "wave") {
-        cell.position.x = baseX + Math.sin(phase * 0.84) * cellWidth * projectionScale * 0.28;
-        cell.position.y = baseY + Math.cos(phase) * cellHeight * projectionScale * 0.38;
-        cell.rotation.z = Math.sin(phase * 0.62) * 0.12;
-        cell.position.z = -baseDistance * (1 + Math.sin(phase) * 0.08);
+        cell.position.x += Math.sin(phase * 0.84) *
+          cellWidth * projectionScale * 0.5 * settings.amplitude;
+        cell.position.y += Math.cos(phase) *
+          cellHeight * projectionScale * 0.65 * settings.amplitude;
+        cell.rotation.z += Math.sin(phase * 0.62) * 0.22 * settings.amplitude;
+        cell.position.z = -baseDistance * Math.max(
+          0.16,
+          1 + Math.sin(phase) * 0.16 * settings.amplitude,
+        );
       } else {
         const xTrack = columnCount * cellWidth * projectionScale;
         const yTrack = rowCount * cellHeight * projectionScale;
         const xStart = (-this.halfWidth + cellWidth * 0.5) * projectionScale;
         const yStart = (this.halfHeight - cellHeight * 0.5) * projectionScale;
-        const xTravel = time * speed * cellWidth * projectionScale * 0.52;
-        const yTravel = time * speed * cellHeight * projectionScale * 0.31;
-        cell.position.x = xStart + mod(
+        const xTravel = time * speed * cellWidth * projectionScale * 0.68;
+        const yTravel = time * speed * cellHeight * projectionScale * 0.42;
+        cell.position.x = vanishX + xStart + mod(
           columnIndex * cellWidth * projectionScale + xTravel,
           xTrack,
         );
-        cell.position.y = yStart - mod(
+        cell.position.y = vanishY + yStart - mod(
           rowIndex * cellHeight * projectionScale + yTravel,
           yTrack,
         );

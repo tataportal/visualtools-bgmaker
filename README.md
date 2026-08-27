@@ -27,7 +27,9 @@ exports/
 - Uno o varios textos configurables, separados con `|`.
 - Composiciones: Tunel, Filas, Columnas y Reticula.
 - Modos de movimiento: Avance, Pulso, Giro y Onda.
-- Velocidad, espaciado, tamano y perspectiva ajustables.
+- Rangos amplios para velocidad, espaciado, tamano y perspectiva.
+- Controles procedurales de cantidad, variacion, amplitud, frecuencia, torsion y semilla.
+- Punto de fuga X/Y y origen de profundidad Z configurable para el tunel.
 - Fondo solido o gradiente y colores editables.
 - Exportacion MP4 a 30 fps mediante `ffmpeg`.
 
