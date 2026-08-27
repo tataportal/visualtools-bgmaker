@@ -24,7 +24,8 @@ exports/
 
 ## Controles
 
-- Texto, formato y orientacion configurables.
+- Uno o varios textos configurables, separados con `|`.
+- Composiciones: Tunel, Filas, Columnas y Reticula.
 - Modos de movimiento: Avance, Pulso, Giro y Onda.
 - Velocidad, espaciado, tamano y perspectiva ajustables.
 - Fondo solido o gradiente y colores editables.

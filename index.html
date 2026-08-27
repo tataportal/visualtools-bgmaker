@@ -14,8 +14,15 @@
 
       <aside class="panel">
         <label class="field span-2">
-          Texto
-          <input id="text" type="text" value="SALE" maxlength="18" autocomplete="off" />
+          Textos
+          <input
+            id="text"
+            type="text"
+            value="SALE"
+            maxlength="80"
+            placeholder="SALE | 50% | HOY"
+            autocomplete="off"
+          />
         </label>
 
         <label class="field">
@@ -37,8 +44,30 @@
           </select>
         </label>
 
-        <fieldset class="field movement-types span-2">
-          <legend>Modo</legend>
+        <fieldset class="field choice-types span-2">
+          <legend>Composicion</legend>
+          <div class="segmented">
+            <label>
+              <input type="radio" name="compositionType" value="tunnel" checked />
+              <span>Tunel</span>
+            </label>
+            <label>
+              <input type="radio" name="compositionType" value="rows" />
+              <span>Filas</span>
+            </label>
+            <label>
+              <input type="radio" name="compositionType" value="columns" />
+              <span>Columnas</span>
+            </label>
+            <label>
+              <input type="radio" name="compositionType" value="grid" />
+              <span>Reticula</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="field choice-types span-2">
+          <legend>Movimiento</legend>
           <div class="segmented">
             <label>
               <input type="radio" name="movementType" value="depth" checked />

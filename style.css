@@ -75,13 +75,13 @@ a {
   text-transform: uppercase;
 }
 
-.movement-types {
+.choice-types {
   margin: 0;
   border: 0;
   padding: 0;
 }
 
-.movement-types legend {
+.choice-types legend {
   margin-bottom: 7px;
   padding: 0;
 }

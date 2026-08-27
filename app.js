@@ -31,6 +31,7 @@ const outputs = {
 const exportBtn = $("#exportBtn");
 const downloadLink = $("#downloadLink");
 const statusEl = $("#status");
+const compositionInputs = [...document.querySelectorAll('input[name="compositionType"]')];
 const movementInputs = [...document.querySelectorAll('input[name="movementType"]')];
 
 const formats = {
@@ -68,14 +69,25 @@ function dimensionsFor(format, orientation) {
 
 function settingsNow() {
   const dimensions = dimensionsFor(controls.format.value, controls.orientation.value);
+  const textParts = (controls.text.value || "SALE")
+    .split("|")
+    .map((part) => part.trim().toUpperCase())
+    .filter(Boolean)
+    .slice(0, 8);
+
+  if (!textParts.length) textParts.push("SALE");
+
   return {
-    text: (controls.text.value || "SALE").trim().toUpperCase() || "SALE",
+    text: textParts[0],
+    textParts,
     format: controls.format.value,
     orientation: controls.orientation.value,
     width: dimensions.width,
     height: dimensions.height,
     fps: 30,
     duration: Number(controls.duration.value),
+    compositionType:
+      document.querySelector('input[name="compositionType"]:checked')?.value || "tunnel",
     movementType: document.querySelector('input[name="movementType"]:checked')?.value || "depth",
     motion: Number(controls.motion.value),
     spacing: Number(controls.spacing.value),
@@ -228,6 +240,85 @@ function makeFrameTexture(settings, aspect, frameWidth, frameHeight, textHeight)
   return texture;
 }
 
+function makeStripTexture(text, settings, axis) {
+  const canvas = document.createElement("canvas");
+  const horizontal = axis === "horizontal";
+  canvas.width = horizontal ? 2048 : 512;
+  canvas.height = horizontal ? 320 : 2048;
+
+  const crossSize = horizontal ? canvas.height : canvas.width;
+  const fontSize = clamp(crossSize * 0.58 * settings.scale, 42, crossSize * 0.88);
+  const gap = fontSize * (0.25 + settings.spacing * 0.48);
+  let context = canvas.getContext("2d");
+
+  context.font = `${fontSize}px Didot, "Bodoni 72", Georgia, serif`;
+  const wordWidth = context.measureText(text).width;
+  const step = Math.max(fontSize * 1.2, wordWidth + gap);
+  const longSize = horizontal ? canvas.width : canvas.height;
+  const slotCount = Math.max(2, Math.round(longSize / step));
+
+  if (horizontal) canvas.width = Math.max(256, Math.round(slotCount * step));
+  else canvas.height = Math.max(256, Math.round(slotCount * step));
+
+  context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = settings.textColor;
+  context.font = `${fontSize}px Didot, "Bodoni 72", Georgia, serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  if (horizontal) {
+    for (let index = 0; index < slotCount; index += 1) {
+      context.fillText(text, step * (index + 0.5), canvas.height / 2);
+    }
+  } else {
+    for (let index = 0; index < slotCount; index += 1) {
+      context.save();
+      context.translate(canvas.width / 2, step * (index + 0.5));
+      context.rotate(-Math.PI / 2);
+      context.fillText(text, 0, 0);
+      context.restore();
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.generateMipmaps = true;
+  return texture;
+}
+
+function makeLabelTexture(text, settings) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 512;
+  const context = canvas.getContext("2d");
+  let fontSize = 300 * settings.scale;
+
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = settings.textColor;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.font = `${fontSize}px Didot, "Bodoni 72", Georgia, serif`;
+
+  const measured = context.measureText(text).width;
+  if (measured > canvas.width * 0.88) {
+    fontSize *= (canvas.width * 0.88) / measured;
+    context.font = `${fontSize}px Didot, "Bodoni 72", Georgia, serif`;
+  }
+
+  context.fillText(text, canvas.width / 2, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  return texture;
+}
+
 function textMaterial(texture) {
   return new THREE.MeshBasicMaterial({
     map: texture,
@@ -297,6 +388,31 @@ class TunnelRenderer {
     const tangent = Math.tan(THREE.MathUtils.degToRad(fov / 2));
     const halfHeight = 1;
     const halfWidth = aspect;
+
+    this.camera.fov = fov;
+    this.camera.aspect = aspect;
+    this.camera.updateProjectionMatrix();
+    this.halfWidth = halfWidth;
+    this.halfHeight = halfHeight;
+    this.depthStrength = depthT;
+    this.patternDistance = halfHeight / tangent;
+    this.compositionType = settings.compositionType;
+    this.scene.background = makeBackgroundTexture(settings);
+
+    if (settings.compositionType === "rows") {
+      this.buildRows(settings, spacingT);
+    } else if (settings.compositionType === "columns") {
+      this.buildColumns(settings, spacingT);
+    } else if (settings.compositionType === "grid") {
+      this.buildGrid(settings, spacingT);
+    } else {
+      this.buildTunnel(settings, aspect, tangent, depthT, spacingT);
+    }
+  }
+
+  buildTunnel(settings, aspect, tangent, depthT, spacingT) {
+    const halfHeight = this.halfHeight;
+    const halfWidth = this.halfWidth;
     const shortAxisScale = Math.min(1, aspect);
     const frameWidth = halfWidth * 2.08;
     const frameHeight = halfHeight * 2.08;
@@ -312,15 +428,9 @@ class TunnelRenderer {
       22,
     );
 
-    this.camera.fov = fov;
-    this.camera.aspect = aspect;
-    this.camera.updateProjectionMatrix();
     this.nearDistance = nearDistance;
     this.depthStep = depthStep;
     this.ringCount = ringCount;
-    this.halfWidth = halfWidth;
-    this.halfHeight = halfHeight;
-    this.scene.background = makeBackgroundTexture(settings);
 
     const frameTexture = makeFrameTexture(
       settings,
@@ -354,10 +464,115 @@ class TunnelRenderer {
     this.resources.push(stripeGeometry, stripeMaterial);
   }
 
+  buildRows(settings, spacingT) {
+    const rowCount = clamp(Math.round(lerp(12, 5, spacingT)), 5, 12);
+    const laneHeight = (this.halfHeight * 2) / rowCount;
+    const geometry = new THREE.PlaneGeometry(this.halfWidth * 3.1, laneHeight * 0.94);
+    this.resources.push(geometry);
+
+    for (let index = 0; index < rowCount; index += 1) {
+      const text = settings.textParts[index % settings.textParts.length];
+      const texture = makeStripTexture(text, settings, "horizontal");
+      texture.repeat.set(1.65, 1);
+      const material = textMaterial(texture);
+      material.depthWrite = false;
+      const row = new THREE.Mesh(geometry, material);
+      const baseY = this.halfHeight - laneHeight * (index + 0.5);
+      row.position.set(0, baseY, -this.patternDistance);
+      row.userData = {
+        kind: "row",
+        index,
+        baseY,
+        laneHeight,
+        texture,
+        baseOffset: mod(index * 0.137, 1),
+      };
+      texture.offset.x = row.userData.baseOffset;
+      this.ringRoot.add(row);
+      this.rings.push(row);
+      this.resources.push(texture, material);
+    }
+  }
+
+  buildColumns(settings, spacingT) {
+    const columnCount = clamp(Math.round(lerp(10, 4, spacingT)), 4, 10);
+    const laneWidth = (this.halfWidth * 2) / columnCount;
+    const geometry = new THREE.PlaneGeometry(laneWidth * 0.92, this.halfHeight * 3.1);
+    this.resources.push(geometry);
+
+    for (let index = 0; index < columnCount; index += 1) {
+      const text = settings.textParts[index % settings.textParts.length];
+      const texture = makeStripTexture(text, settings, "vertical");
+      texture.repeat.set(1, 1.65);
+      const material = textMaterial(texture);
+      material.depthWrite = false;
+      const column = new THREE.Mesh(geometry, material);
+      const baseX = -this.halfWidth + laneWidth * (index + 0.5);
+      column.position.set(baseX, 0, -this.patternDistance);
+      column.userData = {
+        kind: "column",
+        index,
+        baseX,
+        laneWidth,
+        texture,
+        baseOffset: mod(index * 0.163, 1),
+      };
+      texture.offset.y = column.userData.baseOffset;
+      this.ringRoot.add(column);
+      this.rings.push(column);
+      this.resources.push(texture, material);
+    }
+  }
+
+  buildGrid(settings, spacingT) {
+    const columnCount = clamp(Math.round(lerp(7, 3, spacingT)), 3, 7);
+    const rowCount = clamp(
+      Math.round((columnCount / Math.max(this.halfWidth, 0.4)) * 0.7),
+      3,
+      12,
+    );
+    const cellWidth = (this.halfWidth * 2) / columnCount;
+    const cellHeight = (this.halfHeight * 2) / rowCount;
+    const geometry = new THREE.PlaneGeometry(cellWidth * 0.94, cellHeight * 0.78);
+    const variants = settings.textParts.map((text) => {
+      const texture = makeLabelTexture(text, settings);
+      const material = textMaterial(texture);
+      material.depthWrite = false;
+      this.resources.push(texture, material);
+      return material;
+    });
+    this.resources.push(geometry);
+
+    for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+      for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+        const index = rowIndex * columnCount + columnIndex;
+        const cell = new THREE.Mesh(geometry, variants[index % variants.length]);
+        const baseX = -this.halfWidth + cellWidth * (columnIndex + 0.5);
+        const baseY = this.halfHeight - cellHeight * (rowIndex + 0.5);
+        cell.position.set(baseX, baseY, -this.patternDistance);
+        cell.userData = {
+          kind: "cell",
+          index,
+          rowIndex,
+          columnIndex,
+          rowCount,
+          columnCount,
+          cellWidth,
+          cellHeight,
+          baseX,
+          baseY,
+        };
+        this.ringRoot.add(cell);
+        this.rings.push(cell);
+      }
+    }
+  }
+
   render(time, settings, width, height) {
     this.setSize(width, height);
     const designKey = [
-      settings.text,
+      settings.textParts.join("~"),
+      settings.compositionType,
       settings.spacing,
       settings.scale,
       settings.depth,
@@ -375,6 +590,20 @@ class TunnelRenderer {
       this.designKey = designKey;
     }
 
+    if (this.compositionType === "rows") {
+      this.renderRows(time, settings);
+    } else if (this.compositionType === "columns") {
+      this.renderColumns(time, settings);
+    } else if (this.compositionType === "grid") {
+      this.renderGrid(time, settings);
+    } else {
+      this.renderTunnel(time, settings);
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  renderTunnel(time, settings) {
     for (let index = 0; index < this.rings.length; index += 1) {
       const frame = this.rings[index];
       let distance;
@@ -408,8 +637,103 @@ class TunnelRenderer {
 
       frame.position.z = -distance;
     }
+  }
 
-    this.renderer.render(this.scene, this.camera);
+  renderRows(time, settings) {
+    for (const row of this.rings) {
+      const { index, baseY, laneHeight, texture, baseOffset } = row.userData;
+      const direction = index % 2 === 0 ? 1 : -1;
+      const phase = time * settings.motion * 1.35 + index * 0.72;
+      const travel = time * settings.motion * 0.075 * direction;
+
+      row.position.set(0, baseY, -this.patternDistance);
+      row.rotation.set(0, 0, 0);
+      row.scale.set(1, 1, 1);
+      texture.offset.x = mod(baseOffset - travel, 1);
+
+      if (settings.movementType === "pulse") {
+        row.scale.x = 0.88 + Math.sin(phase) * 0.12;
+        row.scale.y = 0.92 + Math.cos(phase * 0.8) * 0.08;
+      } else if (settings.movementType === "spin") {
+        row.rotation.z = Math.sin(phase * 0.72) * (0.06 + this.depthStrength * 0.08);
+        row.position.x = Math.cos(phase) * this.halfWidth * 0.08;
+      } else if (settings.movementType === "wave") {
+        row.position.y = baseY + Math.sin(phase) * laneHeight * 0.34;
+        row.position.x = Math.cos(phase * 0.68) * this.halfWidth * 0.065;
+        row.rotation.z = Math.sin(phase * 0.58) * 0.045;
+      }
+    }
+  }
+
+  renderColumns(time, settings) {
+    for (const column of this.rings) {
+      const { index, baseX, laneWidth, texture, baseOffset } = column.userData;
+      const direction = index % 2 === 0 ? 1 : -1;
+      const phase = time * settings.motion * 1.28 + index * 0.77;
+      const travel = time * settings.motion * 0.07 * direction;
+
+      column.position.set(baseX, 0, -this.patternDistance);
+      column.rotation.set(0, 0, 0);
+      column.scale.set(1, 1, 1);
+      texture.offset.y = mod(baseOffset + travel, 1);
+
+      if (settings.movementType === "pulse") {
+        column.scale.x = 0.84 + Math.sin(phase) * 0.16;
+        column.scale.y = 0.94 + Math.cos(phase * 0.74) * 0.06;
+      } else if (settings.movementType === "spin") {
+        column.rotation.z = Math.sin(phase * 0.66) * (0.07 + this.depthStrength * 0.07);
+        column.position.y = Math.cos(phase) * this.halfHeight * 0.07;
+      } else if (settings.movementType === "wave") {
+        column.position.x = baseX + Math.sin(phase) * laneWidth * 0.36;
+        column.position.y = Math.cos(phase * 0.62) * this.halfHeight * 0.065;
+        column.rotation.z = Math.sin(phase * 0.53) * 0.052;
+      }
+    }
+  }
+
+  renderGrid(time, settings) {
+    for (const cell of this.rings) {
+      const {
+        index,
+        rowIndex,
+        columnIndex,
+        rowCount,
+        columnCount,
+        cellWidth,
+        cellHeight,
+        baseX,
+        baseY,
+      } = cell.userData;
+      const phase = time * settings.motion * 1.42 + rowIndex * 0.58 + columnIndex * 0.71;
+
+      cell.position.set(baseX, baseY, -this.patternDistance);
+      cell.rotation.set(0, 0, 0);
+      cell.scale.set(1, 1, 1);
+
+      if (settings.movementType === "pulse") {
+        const pulse = 0.78 + (Math.sin(phase) + 1) * 0.16;
+        cell.scale.setScalar(pulse);
+        cell.position.z = -this.patternDistance * (1 + Math.sin(phase) * 0.035);
+      } else if (settings.movementType === "spin") {
+        const direction = (rowIndex + columnIndex) % 2 === 0 ? 1 : -1;
+        cell.rotation.z = time * settings.motion * 0.48 * direction + index * 0.025;
+        cell.scale.setScalar(0.88 + Math.sin(phase * 0.7) * 0.08);
+      } else if (settings.movementType === "wave") {
+        cell.position.x = baseX + Math.sin(phase * 0.84) * cellWidth * 0.24;
+        cell.position.y = baseY + Math.cos(phase) * cellHeight * 0.34;
+        cell.rotation.z = Math.sin(phase * 0.62) * 0.12;
+        cell.position.z = -this.patternDistance * (1 + Math.sin(phase) * 0.045);
+      } else {
+        const xTrack = columnCount * cellWidth;
+        const yTrack = rowCount * cellHeight;
+        const xStart = -this.halfWidth + cellWidth * 0.5;
+        const yStart = this.halfHeight - cellHeight * 0.5;
+        const xTravel = time * settings.motion * cellWidth * 0.48;
+        const yTravel = time * settings.motion * cellHeight * 0.26;
+        cell.position.x = xStart + mod(columnIndex * cellWidth + xTravel, xTrack);
+        cell.position.y = yStart - mod(rowIndex * cellHeight + yTravel, yTrack);
+      }
+    }
   }
 
   dispose() {
@@ -531,6 +855,10 @@ Object.values(controls).forEach((control) => {
 });
 
 movementInputs.forEach((input) => {
+  input.addEventListener("change", syncUi);
+});
+
+compositionInputs.forEach((input) => {
   input.addEventListener("change", syncUi);
 });
 
