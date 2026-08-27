@@ -1,4 +1,5 @@
 import * as THREE from "./node_modules/three/build/three.module.js";
+import { mergeGeometries } from "./node_modules/three/examples/jsm/utils/BufferGeometryUtils.js";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -31,6 +32,8 @@ const outputs = {
 const exportBtn = $("#exportBtn");
 const downloadLink = $("#downloadLink");
 const statusEl = $("#status");
+const colorBField = $("#colorBField");
+const angleField = $("#angleField");
 const compositionInputs = [...document.querySelectorAll('input[name="compositionType"]')];
 const movementInputs = [...document.querySelectorAll('input[name="movementType"]')];
 
@@ -103,12 +106,15 @@ function settingsNow() {
 
 function syncUi() {
   const settings = settingsNow();
-  outputs.motion.value = settings.motion.toFixed(2);
+  outputs.motion.value = `${settings.motion.toFixed(1)}x`;
   outputs.spacing.value = settings.spacing.toFixed(2);
   outputs.scale.value = settings.scale.toFixed(2);
   outputs.depth.value = settings.depth.toFixed(2);
   outputs.angle.value = String(settings.angle);
   outputs.duration.value = `${settings.duration}s`;
+  const gradientEnabled = settings.bgMode === "gradient";
+  colorBField.hidden = !gradientEnabled;
+  angleField.hidden = !gradientEnabled;
   statusEl.textContent = `${settings.width} x ${settings.height} listo.`;
 }
 
@@ -141,156 +147,6 @@ function makeBackgroundTexture(settings) {
   return texture;
 }
 
-function drawRepeatedText(context, text, start, end, y, fontSize, gap) {
-  context.font = `${fontSize}px Didot, "Bodoni 72", Georgia, serif`;
-  context.textAlign = "left";
-  context.textBaseline = "middle";
-  const wordWidth = context.measureText(text).width;
-  const available = Math.max(1, end - start);
-  const count = Math.max(1, Math.floor((available + gap) / (wordWidth + gap)));
-  const totalWidth = count * wordWidth + Math.max(0, count - 1) * gap;
-  let x = start + (available - totalWidth) / 2;
-
-  context.save();
-  context.beginPath();
-  context.rect(start, y - fontSize * 0.56, available, fontSize * 1.12);
-  context.clip();
-  for (let index = 0; index < count; index += 1) {
-    context.fillText(text, x, y);
-    x += wordWidth + gap;
-  }
-  context.restore();
-}
-
-function makeFrameTexture(settings, aspect, frameWidth, frameHeight, textHeight) {
-  const canvas = document.createElement("canvas");
-  if (aspect >= 1) {
-    canvas.width = 2048;
-    canvas.height = Math.max(640, Math.round(2048 / aspect));
-  } else {
-    canvas.height = 2048;
-    canvas.width = Math.max(640, Math.round(2048 * aspect));
-  }
-
-  const context = canvas.getContext("2d");
-  const fontSize = Math.max(18, (textHeight / frameHeight) * canvas.height * 0.96);
-  const cornerGap = fontSize * (0.62 + settings.spacing * 0.54);
-  const wordGap = fontSize * (0.14 + settings.spacing * 0.26);
-  const baseline = fontSize * 0.54;
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = settings.textColor;
-
-  drawRepeatedText(
-    context,
-    settings.text,
-    cornerGap,
-    canvas.width - cornerGap,
-    baseline,
-    fontSize,
-    wordGap,
-  );
-
-  context.save();
-  context.translate(canvas.width, canvas.height);
-  context.rotate(Math.PI);
-  drawRepeatedText(
-    context,
-    settings.text,
-    cornerGap,
-    canvas.width - cornerGap,
-    baseline,
-    fontSize,
-    wordGap,
-  );
-  context.restore();
-
-  context.save();
-  context.translate(0, canvas.height);
-  context.rotate(-Math.PI / 2);
-  drawRepeatedText(
-    context,
-    settings.text,
-    cornerGap,
-    canvas.height - cornerGap,
-    baseline,
-    fontSize,
-    wordGap,
-  );
-  context.restore();
-
-  context.save();
-  context.translate(canvas.width, 0);
-  context.rotate(Math.PI / 2);
-  drawRepeatedText(
-    context,
-    settings.text,
-    cornerGap,
-    canvas.height - cornerGap,
-    baseline,
-    fontSize,
-    wordGap,
-  );
-  context.restore();
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = true;
-  return texture;
-}
-
-function makeStripTexture(text, settings, axis) {
-  const canvas = document.createElement("canvas");
-  const horizontal = axis === "horizontal";
-  canvas.width = horizontal ? 2048 : 512;
-  canvas.height = horizontal ? 320 : 2048;
-
-  const crossSize = horizontal ? canvas.height : canvas.width;
-  const fontSize = clamp(crossSize * 0.58 * settings.scale, 42, crossSize * 0.88);
-  const gap = fontSize * (0.25 + settings.spacing * 0.48);
-  let context = canvas.getContext("2d");
-
-  context.font = `${fontSize}px Didot, "Bodoni 72", Georgia, serif`;
-  const wordWidth = context.measureText(text).width;
-  const step = Math.max(fontSize * 1.2, wordWidth + gap);
-  const longSize = horizontal ? canvas.width : canvas.height;
-  const slotCount = Math.max(2, Math.round(longSize / step));
-
-  if (horizontal) canvas.width = Math.max(256, Math.round(slotCount * step));
-  else canvas.height = Math.max(256, Math.round(slotCount * step));
-
-  context = canvas.getContext("2d");
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = settings.textColor;
-  context.font = `${fontSize}px Didot, "Bodoni 72", Georgia, serif`;
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-
-  if (horizontal) {
-    for (let index = 0; index < slotCount; index += 1) {
-      context.fillText(text, step * (index + 0.5), canvas.height / 2);
-    }
-  } else {
-    for (let index = 0; index < slotCount; index += 1) {
-      context.save();
-      context.translate(canvas.width / 2, step * (index + 0.5));
-      context.rotate(-Math.PI / 2);
-      context.fillText(text, 0, 0);
-      context.restore();
-    }
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.generateMipmaps = true;
-  return texture;
-}
-
 function makeLabelTexture(text, settings) {
   const canvas = document.createElement("canvas");
   canvas.width = 1024;
@@ -317,6 +173,44 @@ function makeLabelTexture(text, settings) {
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = true;
   return texture;
+}
+
+function makeWordAsset(text, settings, textHeight) {
+  const canvas = document.createElement("canvas");
+  const fontSize = 192;
+  const paddingX = 38;
+  const paddingY = 28;
+  let context = canvas.getContext("2d");
+
+  context.font = `${fontSize}px Didot, "Bodoni 72", Georgia, serif`;
+  const metrics = context.measureText(text);
+  canvas.width = Math.max(180, Math.ceil(metrics.width + paddingX * 2));
+  canvas.height = fontSize + paddingY * 2;
+
+  context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = settings.textColor;
+  context.font = `${fontSize}px Didot, "Bodoni 72", Georgia, serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(text, canvas.width / 2, canvas.height / 2 + fontSize * 0.035);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  const aspect = canvas.width / canvas.height;
+  const geometry = new THREE.PlaneGeometry(textHeight * aspect, textHeight);
+  const material = textMaterial(texture);
+
+  return {
+    texture,
+    material,
+    geometry,
+    width: textHeight * aspect,
+    height: textHeight,
+  };
 }
 
 function textMaterial(texture) {
@@ -382,9 +276,9 @@ class TunnelRenderer {
     this.clearDesign();
 
     const aspect = this.width / this.height;
-    const depthT = clamp((settings.depth - 0.25) / 0.7, 0, 1);
-    const spacingT = clamp((settings.spacing - 0.45) / 1.95, 0, 1);
-    const fov = lerp(70, 48, depthT);
+    const depthT = clamp(settings.depth, 0, 1);
+    const spacingT = clamp((settings.spacing - 0.15) / 2.85, 0, 1);
+    const fov = lerp(38, 82, depthT);
     const tangent = Math.tan(THREE.MathUtils.degToRad(fov / 2));
     const halfHeight = 1;
     const halfWidth = aspect;
@@ -417,34 +311,64 @@ class TunnelRenderer {
     const frameWidth = halfWidth * 2.08;
     const frameHeight = halfHeight * 2.08;
     const nearDistance = halfHeight / (tangent * 1.08);
-    const farRatio = lerp(3.65, 4.55, depthT);
-    const depthStep = lerp(1.1, 1.34, spacingT);
-    const requestedTextHeight = 0.205 * shortAxisScale * settings.scale;
-    const availableBandHeight = halfHeight * (1 - 1 / depthStep) * 1.3;
-    const textHeight = Math.min(requestedTextHeight, availableBandHeight);
+    const farRatio = lerp(4.5, 7.2, depthT);
+    const depthStep = clamp(
+      lerp(1.12, 1.52, depthT) * lerp(0.97, 1.06, spacingT),
+      1.085,
+      1.68,
+    );
+    const textHeight = 0.205 * shortAxisScale * settings.scale;
     const ringCount = clamp(
       Math.floor(Math.log(farRatio) / Math.log(depthStep)) + 1,
-      7,
-      22,
+      6,
+      12,
     );
 
     this.nearDistance = nearDistance;
     this.depthStep = depthStep;
     this.ringCount = ringCount;
 
-    const frameTexture = makeFrameTexture(
-      settings,
-      aspect,
-      frameWidth,
-      frameHeight,
-      textHeight,
-    );
-    const frameMaterial = textMaterial(frameTexture);
-    const frameGeometry = new THREE.PlaneGeometry(frameWidth, frameHeight);
-    this.resources.push(frameTexture, frameMaterial, frameGeometry);
+    const asset = makeWordAsset(settings.text, settings, textHeight);
+    asset.material.depthWrite = true;
+    const wordGap = textHeight * lerp(0.08, 2.7, spacingT);
+    const cornerGap = textHeight * lerp(0.5, 2.4, spacingT);
+    const wordGeometries = [];
+
+    const addSide = (length, fixed, rotation, vertical) => {
+      const available = Math.max(asset.width, length - cornerGap * 2);
+      const count = Math.max(1, Math.floor((available + wordGap) / (asset.width + wordGap)));
+      const total = count * asset.width + Math.max(0, count - 1) * wordGap;
+      const start = -total / 2 + asset.width / 2;
+
+      for (let index = 0; index < count; index += 1) {
+        const position = start + index * (asset.width + wordGap);
+        const geometry = asset.geometry.clone();
+        const matrix = new THREE.Matrix4();
+        const translation = vertical
+          ? new THREE.Vector3(fixed, position, 0)
+          : new THREE.Vector3(position, fixed, 0);
+        matrix.compose(
+          translation,
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rotation),
+          new THREE.Vector3(1, 1, 1),
+        );
+        geometry.applyMatrix4(matrix);
+        wordGeometries.push(geometry);
+      }
+    };
+
+    addSide(frameWidth, halfHeight, 0, false);
+    addSide(frameWidth, -halfHeight, Math.PI, false);
+    addSide(frameHeight, -halfWidth, Math.PI / 2, true);
+    addSide(frameHeight, halfWidth, -Math.PI / 2, true);
+
+    const frameGeometry = mergeGeometries(wordGeometries, false);
+    for (const geometry of wordGeometries) geometry.dispose();
+    if (!frameGeometry) throw new Error("No se pudo construir el marco tipografico.");
+    this.resources.push(asset.texture, asset.material, asset.geometry, frameGeometry);
 
     for (let index = 0; index < ringCount; index += 1) {
-      const frame = new THREE.Mesh(frameGeometry, frameMaterial);
+      const frame = new THREE.Mesh(frameGeometry, asset.material);
       this.ringRoot.add(frame);
       this.rings.push(frame);
     }
@@ -465,67 +389,98 @@ class TunnelRenderer {
   }
 
   buildRows(settings, spacingT) {
-    const rowCount = clamp(Math.round(lerp(12, 5, spacingT)), 5, 12);
+    const rowCount = clamp(Math.round(lerp(15, 4, spacingT)), 4, 15);
     const laneHeight = (this.halfHeight * 2) / rowCount;
-    const geometry = new THREE.PlaneGeometry(this.halfWidth * 3.1, laneHeight * 0.94);
-    this.resources.push(geometry);
 
     for (let index = 0; index < rowCount; index += 1) {
       const text = settings.textParts[index % settings.textParts.length];
-      const texture = makeStripTexture(text, settings, "horizontal");
-      texture.repeat.set(1.65, 1);
-      const material = textMaterial(texture);
-      material.depthWrite = false;
-      const row = new THREE.Mesh(geometry, material);
-      const baseY = this.halfHeight - laneHeight * (index + 0.5);
-      row.position.set(0, baseY, -this.patternDistance);
+      const textHeight = laneHeight * 0.74 * settings.scale;
+      const asset = makeWordAsset(text, settings, textHeight);
+      asset.material.depthWrite = false;
+      const gap = textHeight * lerp(0.08, 3.2, spacingT);
+      const wordStep = asset.width + gap;
+      const normalizedY = rowCount === 1 ? 0 : (index / (rowCount - 1)) * 2 - 1;
+      const distance = this.patternDistance * (
+        1 + Math.abs(normalizedY) * this.depthStrength * 1.15
+      );
+      const projectionScale = distance / this.patternDistance;
+      const screenY = this.halfHeight - laneHeight * (index + 0.5);
+      const baseY = screenY * projectionScale;
+      const span = this.halfWidth * 4.2 * projectionScale;
+      const wordCount = Math.ceil(span / wordStep) + 3;
+      const start = -(wordCount * wordStep) / 2 + wordStep / 2;
+      const row = new THREE.Group();
+
+      for (let wordIndex = 0; wordIndex < wordCount; wordIndex += 1) {
+        const word = new THREE.Mesh(asset.geometry, asset.material);
+        word.position.x = start + wordIndex * wordStep;
+        row.add(word);
+      }
+
+      row.position.set(0, baseY, -distance);
       row.userData = {
         kind: "row",
         index,
         baseY,
-        laneHeight,
-        texture,
-        baseOffset: mod(index * 0.137, 1),
+        baseDistance: distance,
+        laneHeight: laneHeight * projectionScale,
+        wordStep,
+        baseOffset: mod(index * wordStep * 0.37, wordStep),
       };
-      texture.offset.x = row.userData.baseOffset;
       this.ringRoot.add(row);
       this.rings.push(row);
-      this.resources.push(texture, material);
+      this.resources.push(asset.texture, asset.material, asset.geometry);
     }
   }
 
   buildColumns(settings, spacingT) {
-    const columnCount = clamp(Math.round(lerp(10, 4, spacingT)), 4, 10);
+    const columnCount = clamp(Math.round(lerp(12, 3, spacingT)), 3, 12);
     const laneWidth = (this.halfWidth * 2) / columnCount;
-    const geometry = new THREE.PlaneGeometry(laneWidth * 0.92, this.halfHeight * 3.1);
-    this.resources.push(geometry);
 
     for (let index = 0; index < columnCount; index += 1) {
       const text = settings.textParts[index % settings.textParts.length];
-      const texture = makeStripTexture(text, settings, "vertical");
-      texture.repeat.set(1, 1.65);
-      const material = textMaterial(texture);
-      material.depthWrite = false;
-      const column = new THREE.Mesh(geometry, material);
-      const baseX = -this.halfWidth + laneWidth * (index + 0.5);
-      column.position.set(baseX, 0, -this.patternDistance);
+      const textHeight = laneWidth * 0.76 * settings.scale;
+      const asset = makeWordAsset(text, settings, textHeight);
+      asset.material.depthWrite = false;
+      const gap = textHeight * lerp(0.08, 3.2, spacingT);
+      const wordStep = asset.width + gap;
+      const normalizedX = columnCount === 1 ? 0 : (index / (columnCount - 1)) * 2 - 1;
+      const distance = this.patternDistance * (
+        1 + Math.abs(normalizedX) * this.depthStrength * 1.15
+      );
+      const projectionScale = distance / this.patternDistance;
+      const screenX = -this.halfWidth + laneWidth * (index + 0.5);
+      const baseX = screenX * projectionScale;
+      const span = this.halfHeight * 4.2 * projectionScale;
+      const wordCount = Math.ceil(span / wordStep) + 3;
+      const start = -(wordCount * wordStep) / 2 + wordStep / 2;
+      const column = new THREE.Group();
+
+      for (let wordIndex = 0; wordIndex < wordCount; wordIndex += 1) {
+        const word = new THREE.Mesh(asset.geometry, asset.material);
+        word.position.y = start + wordIndex * wordStep;
+        word.rotation.z = -Math.PI / 2;
+        column.add(word);
+      }
+
+      column.position.set(baseX, 0, -distance);
       column.userData = {
         kind: "column",
         index,
         baseX,
-        laneWidth,
-        texture,
-        baseOffset: mod(index * 0.163, 1),
+        baseDistance: distance,
+        laneWidth: laneWidth * projectionScale,
+        wordStep,
+        baseOffset: mod(index * wordStep * 0.41, wordStep),
       };
-      texture.offset.y = column.userData.baseOffset;
       this.ringRoot.add(column);
       this.rings.push(column);
-      this.resources.push(texture, material);
+      this.resources.push(asset.texture, asset.material, asset.geometry);
     }
   }
 
   buildGrid(settings, spacingT) {
-    const columnCount = clamp(Math.round(lerp(7, 3, spacingT)), 3, 7);
+    const columnCount = clamp(Math.round(lerp(9, 3, spacingT)), 3, 9);
     const rowCount = clamp(
       Math.round((columnCount / Math.max(this.halfWidth, 0.4)) * 0.7),
       3,
@@ -533,7 +488,11 @@ class TunnelRenderer {
     );
     const cellWidth = (this.halfWidth * 2) / columnCount;
     const cellHeight = (this.halfHeight * 2) / rowCount;
-    const geometry = new THREE.PlaneGeometry(cellWidth * 0.94, cellHeight * 0.78);
+    const cellFill = lerp(0.96, 0.5, spacingT);
+    const geometry = new THREE.PlaneGeometry(
+      cellWidth * cellFill,
+      cellHeight * cellFill * 0.86,
+    );
     const variants = settings.textParts.map((text) => {
       const texture = makeLabelTexture(text, settings);
       const material = textMaterial(texture);
@@ -547,9 +506,16 @@ class TunnelRenderer {
       for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
         const index = rowIndex * columnCount + columnIndex;
         const cell = new THREE.Mesh(geometry, variants[index % variants.length]);
-        const baseX = -this.halfWidth + cellWidth * (columnIndex + 0.5);
-        const baseY = this.halfHeight - cellHeight * (rowIndex + 0.5);
-        cell.position.set(baseX, baseY, -this.patternDistance);
+        const screenX = -this.halfWidth + cellWidth * (columnIndex + 0.5);
+        const screenY = this.halfHeight - cellHeight * (rowIndex + 0.5);
+        const normalizedX = screenX / Math.max(this.halfWidth, 0.001);
+        const normalizedY = screenY / this.halfHeight;
+        const radial = Math.min(1, Math.hypot(normalizedX, normalizedY) / Math.SQRT2);
+        const distance = this.patternDistance * (1 + radial * this.depthStrength * 1.05);
+        const projectionScale = distance / this.patternDistance;
+        const baseX = screenX * projectionScale;
+        const baseY = screenY * projectionScale;
+        cell.position.set(baseX, baseY, -distance);
         cell.userData = {
           kind: "cell",
           index,
@@ -561,6 +527,8 @@ class TunnelRenderer {
           cellHeight,
           baseX,
           baseY,
+          baseDistance: distance,
+          projectionScale,
         };
         this.ringRoot.add(cell);
         this.rings.push(cell);
@@ -604,6 +572,8 @@ class TunnelRenderer {
   }
 
   renderTunnel(time, settings) {
+    const speed = settings.motion * 1.8;
+
     for (let index = 0; index < this.rings.length; index += 1) {
       const frame = this.rings[index];
       let distance;
@@ -614,23 +584,23 @@ class TunnelRenderer {
 
       if (settings.movementType === "pulse") {
         const baseDistance = this.nearDistance * this.depthStep ** index;
-        const phase = time * settings.motion * 1.35 + index * 0.42;
-        distance = baseDistance * (1 + Math.sin(phase) * 0.07);
-        frame.scale.setScalar(1 + Math.sin(phase * 0.82) * 0.025);
+        const phase = time * speed * 1.35 + index * 0.42;
+        distance = baseDistance * (1 + Math.sin(phase) * 0.13);
+        frame.scale.setScalar(1 + Math.sin(phase * 0.82) * 0.055);
       } else if (settings.movementType === "spin") {
-        const progress = time * settings.motion * 0.28;
+        const progress = time * speed * 0.46;
         const depthIndex = mod(index - progress, this.ringCount);
         distance = this.nearDistance * this.depthStep ** depthIndex;
-        frame.rotation.z = time * settings.motion * 0.32 + index * 0.055;
+        frame.rotation.z = time * speed * 0.34 + index * 0.055;
       } else if (settings.movementType === "wave") {
         const baseDistance = this.nearDistance * this.depthStep ** index;
-        const phase = time * settings.motion * 1.15 + index * 0.55;
-        distance = baseDistance * (1 + Math.sin(phase) * 0.045);
-        frame.position.x = Math.sin(phase) * this.halfWidth * 0.065;
-        frame.position.y = Math.cos(phase * 0.83) * this.halfHeight * 0.045;
-        frame.rotation.z = Math.sin(phase * 0.72) * 0.075;
+        const phase = time * speed * 1.15 + index * 0.55;
+        distance = baseDistance * (1 + Math.sin(phase) * 0.09);
+        frame.position.x = Math.sin(phase) * this.halfWidth * 0.1;
+        frame.position.y = Math.cos(phase * 0.83) * this.halfHeight * 0.075;
+        frame.rotation.z = Math.sin(phase * 0.72) * 0.1;
       } else {
-        const progress = time * settings.motion * 0.62;
+        const progress = time * speed * 0.78;
         const depthIndex = mod(index - progress, this.ringCount);
         distance = this.nearDistance * this.depthStep ** depthIndex;
       }
@@ -641,52 +611,56 @@ class TunnelRenderer {
 
   renderRows(time, settings) {
     for (const row of this.rings) {
-      const { index, baseY, laneHeight, texture, baseOffset } = row.userData;
+      const { index, baseY, baseDistance, laneHeight, wordStep, baseOffset } = row.userData;
       const direction = index % 2 === 0 ? 1 : -1;
-      const phase = time * settings.motion * 1.35 + index * 0.72;
-      const travel = time * settings.motion * 0.075 * direction;
+      const speed = settings.motion * 2;
+      const phase = time * speed * 1.15 + index * 0.72;
+      const travel = time * speed * wordStep * 0.44 * direction;
+      const loopX = mod(baseOffset - travel, wordStep) - wordStep * 0.5;
+      const restingX = mod(baseOffset, wordStep) - wordStep * 0.5;
 
-      row.position.set(0, baseY, -this.patternDistance);
+      row.position.set(settings.movementType === "depth" ? loopX : restingX, baseY, -baseDistance);
       row.rotation.set(0, 0, 0);
       row.scale.set(1, 1, 1);
-      texture.offset.x = mod(baseOffset - travel, 1);
 
       if (settings.movementType === "pulse") {
-        row.scale.x = 0.88 + Math.sin(phase) * 0.12;
-        row.scale.y = 0.92 + Math.cos(phase * 0.8) * 0.08;
+        row.scale.x = 0.78 + (Math.sin(phase) + 1) * 0.16;
+        row.scale.y = 0.86 + (Math.cos(phase * 0.8) + 1) * 0.09;
       } else if (settings.movementType === "spin") {
-        row.rotation.z = Math.sin(phase * 0.72) * (0.06 + this.depthStrength * 0.08);
-        row.position.x = Math.cos(phase) * this.halfWidth * 0.08;
+        row.rotation.z = Math.sin(phase * 0.72) * (0.09 + this.depthStrength * 0.13);
+        row.position.x = restingX + Math.cos(phase) * this.halfWidth * 0.12;
       } else if (settings.movementType === "wave") {
         row.position.y = baseY + Math.sin(phase) * laneHeight * 0.34;
-        row.position.x = Math.cos(phase * 0.68) * this.halfWidth * 0.065;
-        row.rotation.z = Math.sin(phase * 0.58) * 0.045;
+        row.position.x = loopX + Math.cos(phase * 0.68) * this.halfWidth * 0.09;
+        row.rotation.z = Math.sin(phase * 0.58) * 0.065;
       }
     }
   }
 
   renderColumns(time, settings) {
     for (const column of this.rings) {
-      const { index, baseX, laneWidth, texture, baseOffset } = column.userData;
+      const { index, baseX, baseDistance, laneWidth, wordStep, baseOffset } = column.userData;
       const direction = index % 2 === 0 ? 1 : -1;
-      const phase = time * settings.motion * 1.28 + index * 0.77;
-      const travel = time * settings.motion * 0.07 * direction;
+      const speed = settings.motion * 2;
+      const phase = time * speed * 1.12 + index * 0.77;
+      const travel = time * speed * wordStep * 0.42 * direction;
+      const loopY = mod(baseOffset + travel, wordStep) - wordStep * 0.5;
+      const restingY = mod(baseOffset, wordStep) - wordStep * 0.5;
 
-      column.position.set(baseX, 0, -this.patternDistance);
+      column.position.set(baseX, settings.movementType === "depth" ? loopY : restingY, -baseDistance);
       column.rotation.set(0, 0, 0);
       column.scale.set(1, 1, 1);
-      texture.offset.y = mod(baseOffset + travel, 1);
 
       if (settings.movementType === "pulse") {
-        column.scale.x = 0.84 + Math.sin(phase) * 0.16;
-        column.scale.y = 0.94 + Math.cos(phase * 0.74) * 0.06;
+        column.scale.x = 0.76 + (Math.sin(phase) + 1) * 0.18;
+        column.scale.y = 0.86 + (Math.cos(phase * 0.74) + 1) * 0.09;
       } else if (settings.movementType === "spin") {
-        column.rotation.z = Math.sin(phase * 0.66) * (0.07 + this.depthStrength * 0.07);
-        column.position.y = Math.cos(phase) * this.halfHeight * 0.07;
+        column.rotation.z = Math.sin(phase * 0.66) * (0.1 + this.depthStrength * 0.12);
+        column.position.y = restingY + Math.cos(phase) * this.halfHeight * 0.11;
       } else if (settings.movementType === "wave") {
         column.position.x = baseX + Math.sin(phase) * laneWidth * 0.36;
-        column.position.y = Math.cos(phase * 0.62) * this.halfHeight * 0.065;
-        column.rotation.z = Math.sin(phase * 0.53) * 0.052;
+        column.position.y = loopY + Math.cos(phase * 0.62) * this.halfHeight * 0.09;
+        column.rotation.z = Math.sin(phase * 0.53) * 0.075;
       }
     }
   }
@@ -703,35 +677,44 @@ class TunnelRenderer {
         cellHeight,
         baseX,
         baseY,
+        baseDistance,
+        projectionScale,
       } = cell.userData;
-      const phase = time * settings.motion * 1.42 + rowIndex * 0.58 + columnIndex * 0.71;
+      const speed = settings.motion * 2;
+      const phase = time * speed * 1.2 + rowIndex * 0.58 + columnIndex * 0.71;
 
-      cell.position.set(baseX, baseY, -this.patternDistance);
+      cell.position.set(baseX, baseY, -baseDistance);
       cell.rotation.set(0, 0, 0);
       cell.scale.set(1, 1, 1);
 
       if (settings.movementType === "pulse") {
         const pulse = 0.78 + (Math.sin(phase) + 1) * 0.16;
         cell.scale.setScalar(pulse);
-        cell.position.z = -this.patternDistance * (1 + Math.sin(phase) * 0.035);
+        cell.position.z = -baseDistance * (1 + Math.sin(phase) * 0.075);
       } else if (settings.movementType === "spin") {
         const direction = (rowIndex + columnIndex) % 2 === 0 ? 1 : -1;
-        cell.rotation.z = time * settings.motion * 0.48 * direction + index * 0.025;
+        cell.rotation.z = time * speed * 0.48 * direction + index * 0.025;
         cell.scale.setScalar(0.88 + Math.sin(phase * 0.7) * 0.08);
       } else if (settings.movementType === "wave") {
-        cell.position.x = baseX + Math.sin(phase * 0.84) * cellWidth * 0.24;
-        cell.position.y = baseY + Math.cos(phase) * cellHeight * 0.34;
+        cell.position.x = baseX + Math.sin(phase * 0.84) * cellWidth * projectionScale * 0.28;
+        cell.position.y = baseY + Math.cos(phase) * cellHeight * projectionScale * 0.38;
         cell.rotation.z = Math.sin(phase * 0.62) * 0.12;
-        cell.position.z = -this.patternDistance * (1 + Math.sin(phase) * 0.045);
+        cell.position.z = -baseDistance * (1 + Math.sin(phase) * 0.08);
       } else {
-        const xTrack = columnCount * cellWidth;
-        const yTrack = rowCount * cellHeight;
-        const xStart = -this.halfWidth + cellWidth * 0.5;
-        const yStart = this.halfHeight - cellHeight * 0.5;
-        const xTravel = time * settings.motion * cellWidth * 0.48;
-        const yTravel = time * settings.motion * cellHeight * 0.26;
-        cell.position.x = xStart + mod(columnIndex * cellWidth + xTravel, xTrack);
-        cell.position.y = yStart - mod(rowIndex * cellHeight + yTravel, yTrack);
+        const xTrack = columnCount * cellWidth * projectionScale;
+        const yTrack = rowCount * cellHeight * projectionScale;
+        const xStart = (-this.halfWidth + cellWidth * 0.5) * projectionScale;
+        const yStart = (this.halfHeight - cellHeight * 0.5) * projectionScale;
+        const xTravel = time * speed * cellWidth * projectionScale * 0.52;
+        const yTravel = time * speed * cellHeight * projectionScale * 0.31;
+        cell.position.x = xStart + mod(
+          columnIndex * cellWidth * projectionScale + xTravel,
+          xTrack,
+        );
+        cell.position.y = yStart - mod(
+          rowIndex * cellHeight * projectionScale + yTravel,
+          yTrack,
+        );
       }
     }
   }
