@@ -1,5 +1,6 @@
-import * as THREE from "./node_modules/three/build/three.module.js";
-import { mergeGeometries } from "./node_modules/three/examples/jsm/utils/BufferGeometryUtils.js";
+import * as THREE from "./vendor/three.module.js";
+import { mergeGeometries } from "./vendor/BufferGeometryUtils.js";
+import { ArrayBufferTarget, Muxer } from "./vendor/mp4-muxer.mjs";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -48,6 +49,7 @@ const outputs = {
 };
 
 const exportBtn = $("#exportBtn");
+const randomBtn = $("#randomBtn");
 const downloadLink = $("#downloadLink");
 const statusEl = $("#status");
 const depthOriginField = $("#depthOriginField");
@@ -101,6 +103,18 @@ function dimensionsFor(format, orientation) {
   if (a === b) return { width: 1080, height: 1080 };
   if (a > b) return { width: even(1080 * (a / b)), height: 1080 };
   return { width: 1080, height: even(1080 * (b / a)) };
+}
+
+function setRangeValue(control, value) {
+  const min = Number(control.min);
+  const max = Number(control.max);
+  const step = Number(control.step) || 1;
+  const snapped = min + Math.round((clamp(value, min, max) - min) / step) * step;
+  control.value = String(clamp(snapped, min, max));
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
 }
 
 function settingsNow() {
@@ -168,6 +182,51 @@ function syncUi() {
   colorBField.hidden = !gradientEnabled;
   angleField.hidden = !gradientEnabled;
   statusEl.textContent = `${settings.width} x ${settings.height} listo.`;
+}
+
+function randomizeSelectedComposition() {
+  const composition =
+    document.querySelector('input[name="compositionType"]:checked')?.value || "tunnel";
+  const movements = ["depth", "pulse", "spin", "wave"];
+  const densityRanges = {
+    tunnel: [5, 28],
+    rows: [4, 26],
+    columns: [4, 24],
+    grid: [6, 32],
+  };
+  const labels = {
+    tunnel: "Tunel",
+    rows: "Filas",
+    columns: "Columnas",
+    grid: "Reticula",
+  };
+  const direction = Math.random() < 0.5 ? -1 : 1;
+  const movement = movements[Math.floor(Math.random() * movements.length)];
+  const densityRange = densityRanges[composition];
+
+  setRangeValue(controls.motion, direction * randomBetween(0.5, 5.8));
+  setRangeValue(controls.spacing, Math.pow(Math.random(), 1.55) * 6.5);
+  setRangeValue(controls.scale, randomBetween(0.35, 2.6));
+  setRangeValue(controls.depth, randomBetween(0.12, 1.9));
+  setRangeValue(controls.density, randomBetween(densityRange[0], densityRange[1]));
+  setRangeValue(controls.variation, Math.pow(Math.random(), 1.4) * 1.2);
+  setRangeValue(controls.amplitude, randomBetween(0.25, 2.6));
+  setRangeValue(controls.frequency, randomBetween(0.25, 4.8));
+  setRangeValue(controls.twist, randomBetween(-2.5, 2.5));
+  setRangeValue(controls.seed, Math.floor(randomBetween(0, 1000)));
+  setRangeValue(controls.vanishX, randomBetween(-0.78, 0.78));
+  setRangeValue(controls.vanishY, randomBetween(-0.78, 0.78));
+
+  if (composition === "tunnel") {
+    setRangeValue(controls.depthOrigin, randomBetween(4, 68));
+  }
+
+  document.querySelector(
+    `input[name="movementType"][value="${movement}"]`,
+  ).checked = true;
+  downloadLink.hidden = true;
+  syncUi();
+  statusEl.textContent = `${labels[composition]} random listo.`;
 }
 
 function makeBackgroundTexture(settings) {
@@ -946,33 +1005,40 @@ function drawPreview(time = performance.now()) {
   requestAnimationFrame(drawPreview);
 }
 
-async function postJson(url, body) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = await response.json();
-  if (!response.ok) throw new Error(json.detail || json.error || "Request failed");
-  return json;
+let downloadUrl = "";
+
+async function supportedAvcConfig(settings) {
+  if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") {
+    throw new Error(
+      "Este navegador no soporta exportacion MP4. Usa Chrome o Safari actualizado.",
+    );
+  }
+
+  const baseConfig = {
+    width: settings.width,
+    height: settings.height,
+    bitrate: Math.max(
+      4_000_000,
+      Math.round(settings.width * settings.height * settings.fps * 0.16),
+    ),
+    framerate: settings.fps,
+    avc: { format: "avc" },
+  };
+
+  for (const codec of ["avc1.640028", "avc1.4d4028", "avc1.420028"]) {
+    const support = await VideoEncoder.isConfigSupported({ ...baseConfig, codec });
+    if (support.supported) return support.config;
+  }
+
+  throw new Error("Este equipo no tiene un codificador H.264 disponible.");
 }
 
-function waitForBlob(canvas) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error("No se pudo renderizar el frame."));
-    }, "image/png");
-  });
-}
-
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
+function exportFilename(settings) {
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+  return `sale-bg-${settings.width}x${settings.height}-${stamp}.mp4`;
 }
 
 async function exportMp4() {
@@ -980,24 +1046,46 @@ async function exportMp4() {
   const frameCount = settings.duration * settings.fps;
   const exportCanvas = document.createElement("canvas");
   const exportTunnel = new TunnelRenderer(exportCanvas);
-  const batchSize = Math.max(2, Math.floor(8_000_000 / (settings.width * settings.height)));
 
   exportBtn.disabled = true;
   downloadLink.hidden = true;
   statusEl.textContent = "Preparando export...";
 
   try {
-    const session = await postJson("/api/session", {});
-    let batch = [];
+    const encoderConfig = await supportedAvcConfig(settings);
+    const target = new ArrayBufferTarget();
+    const muxer = new Muxer({
+      target,
+      video: {
+        codec: "avc",
+        width: settings.width,
+        height: settings.height,
+        frameRate: settings.fps,
+      },
+      fastStart: "in-memory",
+    });
+    let encoderError = null;
+    const encoder = new VideoEncoder({
+      output: (chunk, metadata) => muxer.addVideoChunk(chunk, metadata),
+      error: (error) => {
+        encoderError = error;
+      },
+    });
+    encoder.configure(encoderConfig);
+    const frameDuration = Math.round(1_000_000 / settings.fps);
 
     for (let index = 0; index < frameCount; index += 1) {
       exportTunnel.render(index / settings.fps, settings, settings.width, settings.height);
-      const blob = await waitForBlob(exportCanvas);
-      batch.push({ index, dataUrl: await blobToDataUrl(blob) });
+      const frame = new VideoFrame(exportCanvas, {
+        timestamp: index * frameDuration,
+        duration: frameDuration,
+      });
+      encoder.encode(frame, { keyFrame: index % (settings.fps * 2) === 0 });
+      frame.close();
 
-      if (batch.length === batchSize || index === frameCount - 1) {
-        await postJson("/api/frame-batch", { id: session.id, frames: batch });
-        batch = [];
+      while (encoder.encodeQueueSize > 4) {
+        if (encoderError) throw encoderError;
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
       const progress = Math.round(((index + 1) / frameCount) * 100);
@@ -1006,18 +1094,19 @@ async function exportMp4() {
     }
 
     statusEl.textContent = "Codificando MP4...";
-    const encoded = await postJson("/api/encode", {
-      id: session.id,
-      width: settings.width,
-      height: settings.height,
-      fps: settings.fps,
-      frameCount,
-    });
+    await encoder.flush();
+    if (encoderError) throw encoderError;
+    encoder.close();
+    muxer.finalize();
 
-    downloadLink.href = encoded.url;
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    const file = exportFilename(settings);
+    downloadUrl = URL.createObjectURL(new Blob([target.buffer], { type: "video/mp4" }));
+    downloadLink.href = downloadUrl;
+    downloadLink.download = file;
+    downloadLink.textContent = "Descargar MP4";
     downloadLink.hidden = false;
-    downloadLink.setAttribute("download", "");
-    statusEl.textContent = `Export listo: ${encoded.file}`;
+    statusEl.textContent = `Export listo: ${file}`;
   } catch (error) {
     statusEl.textContent = error.message || "Export fallido.";
   } finally {
@@ -1038,6 +1127,7 @@ compositionInputs.forEach((input) => {
   input.addEventListener("change", syncUi);
 });
 
+randomBtn.addEventListener("click", randomizeSelectedComposition);
 exportBtn.addEventListener("click", exportMp4);
 syncUi();
 requestAnimationFrame(drawPreview);

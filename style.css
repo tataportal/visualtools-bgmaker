@@ -190,6 +190,19 @@ button {
   color: #111;
 }
 
+.random-button {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 8px;
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink);
+}
+
+.random-button:hover {
+  border-color: var(--ink);
+}
+
 button:disabled {
   cursor: wait;
   opacity: 0.58;
